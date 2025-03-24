@@ -206,13 +206,12 @@ void setup()
   InitWiFi();
   Wire.begin(GPIO_NUM_11, GPIO_NUM_12); // Initialize I2C
   dht20.begin();
-  // xTaskCreate( Task3, "Task Temperature" ,2048  ,NULL  ,2 , NULL);
 }
 
 void loop()
 {
   delay(1000);
-  // dht20.begin();
+  Serial.println("hello world");
 
   if (!reconnect()) {
     return;
