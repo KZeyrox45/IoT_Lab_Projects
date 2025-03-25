@@ -255,7 +255,7 @@ void loop()
 
   if (millis() - previousDataSend > telemetrySendInterval)
   {
-    Serial.println("Hello World!");
+    Serial.println("hello world!");
     previousDataSend = millis();
 
     dht20.read();
@@ -266,6 +266,7 @@ void loop()
     if (isnan(temperature) || isnan(humidity)) {
       Serial.println("Failed to read from DHT20 sensor!");
     } else {
+      // Print data in Serial Monitor
       Serial.print("Temperature: ");
       Serial.print(temperature);
       Serial.print(" °C, Humidity: ");
