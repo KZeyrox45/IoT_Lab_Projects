@@ -10,6 +10,8 @@
 #include <Arduino_MQTT_Client.h>
 #include <Server_Side_RPC.h>
 #include <ThingsBoard.h>
+#include <OTA_Firmware_Update.h>
+#include <Espressif_Updater.h>
 
 // DHT20 Sensor
 DHT20 dht20;
@@ -18,7 +20,7 @@ constexpr char WIFI_SSID[] = "TingleJungle";
 constexpr char WIFI_PASSWORD[] = "HexagonIQ";
 
 // to understand how to obtain an access token
-constexpr char TOKEN[] = "WeZKMazPOXCCOpW2Ldfv";
+constexpr char TOKEN[] = "Ki4l69sPDyAcGI3q8eeW";
 // Thingsboard we want to establish a connection too
 constexpr char THINGSBOARD_SERVER[] = "app.coreiot.io";
 
@@ -39,12 +41,20 @@ constexpr uint16_t MAX_MESSAGE_RECEIVE_SIZE = 256U;
 // If the Serial output is mangled, ensure to change the monitor speed accordingly to this variable
 constexpr uint32_t SERIAL_DEBUG_BAUD = 115200U;
 
-uint32_t previousStateChange;
+constexpr char CURRENT_FIRMWARE_TITLE[] = "ESP_OTA";
+constexpr char CURRENT_FIRMWARE_VERSION[] = "1.0.0";
+constexpr uint8_t FIRMWARE_FAILURE_RETRIES = 12U;
+constexpr uint16_t FIRMWARE_PACKET_SIZE = 4096U;
 
+// Target firmware telemetry values
+constexpr char TARGET_FW_TITLE[] = "ESP_OTA 1.4";
+constexpr char TARGET_FW_VERSION[] = "1.4";
+
+uint32_t previousStateChange;
 constexpr int16_t telemetrySendInterval = 5000U;
 uint32_t previousDataSend;
 
-#if ENCRYPTED
+// #if ENCRYPTED
 // See https://comodosslstore.com/resources/what-is-a-root-ca-certificate-and-how-do-i-download-it/
 // on how to get the root certificate of the server we want to communicate with,
 // this is needed to establish a secure connection and changes depending on the website.
@@ -80,7 +90,7 @@ mRGunUHBcnWEvgJBQl9nJEiU0Zsnvgc/ubhPgXRR4Xq37Z0j4r7g1SgEEzwxA57d
 emyPxgcYxn/eR44/KJ4EBs+lVDR3veyJm+kXQ99b21/+jh5Xos1AnX5iItreGCc=
 -----END CERTIFICATE-----
 )";
-#endif
+// #endif
 
 constexpr const char RPC_JSON_METHOD[] = "example_json";
 constexpr const char RPC_TEMPERATURE_METHOD[] = "example_set_temperature";
@@ -100,13 +110,38 @@ WiFiClient espClient;
 Arduino_MQTT_Client mqttClient(espClient);
 // Initialize used apis
 Server_Side_RPC<MAX_RPC_SUBSCRIPTIONS, MAX_RPC_RESPONSE> rpc;
-const std::array<IAPI_Implementation *, 1U> apis = {
-    &rpc};
+OTA_Firmware_Update<> ota;
+Espressif_Updater<> updater;
+const std::array<IAPI_Implementation *, 2U> apis = {
+    &rpc, &ota};
 // Initialize ThingsBoard instance with the maximum needed buffer size
 ThingsBoard tb(mqttClient, MAX_MESSAGE_RECEIVE_SIZE, MAX_MESSAGE_SEND_SIZE, Default_Max_Stack_Size, apis);
 
 // Statuses for subscribing to rpc
 bool subscribed = false;
+
+bool currentFWSent = false;
+bool updateRequestSent = false;
+
+// Flag to track telemetry sending
+bool telemetrySent = false;
+
+void update_starting_callback() {
+  // Nothing to do initially; can add logic to pause other tasks if needed
+}
+
+void progress_callback(const size_t &current, const size_t &total) {
+  Serial.printf("Progress %.2f%%\n", static_cast<float>(current * 100U) / total);
+}
+
+void finished_callback(const bool &success) {
+  if (success) {
+      Serial.println("Done, Reboot now");
+      ESP.restart();
+  } else {
+      Serial.println("Downloading firmware failed");
+  }
+}
 
 /// @brief Processes function for RPC call "example_json"
 /// JsonVariantConst is a JSON variant, that can be queried using operator[]
@@ -176,20 +211,6 @@ void processHumidityChange(const JsonVariantConst &data, JsonDocument &response)
 
 // Task 1: Connect to WiFi
 void wifiTask(void *pvParameters) {
-  Serial.println("Connecting to AP ...");
-  // Attempting to establish a connection to the given WiFi network
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.println("Connected WIFI HOST");
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    // Delay 500ms until a connection has been successfully established
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("Connected to AP");
-#if ENCRYPTED
-  espClient.setCACert(ROOT_CERT);
-#endif
   while (1) {
     // Check WiFi status
     if (WiFi.status() != WL_CONNECTED) {
@@ -204,6 +225,8 @@ void wifiTask(void *pvParameters) {
         Serial.print(".");
       }
 
+      delay(500);
+
       Serial.print("\nConnected to: ");
       Serial.println(WiFi.localIP());
 
@@ -211,10 +234,9 @@ void wifiTask(void *pvParameters) {
       espClient.setCACert(ROOT_CERT);
 #endif
     }
-
-    // Periodically check WiFi status
-    vTaskDelay(1000 / portTICK_PERIOD_MS);
   }
+  // Periodically check WiFi status
+  vTaskDelay(1000 / portTICK_PERIOD_MS);
 }
 
 // Task 2: ThingsBoard connection and RPC subscription
@@ -289,15 +311,68 @@ void dht20Task(void *pvParameters) {
   }
 }
 
+void otaTask(void *pvParameters) {
+  while (1) {
+      if (tb.connected()) {
+          // Send current firmware info if not already sent
+          if (!currentFWSent) {
+              Serial.println("Sending firmware info...");
+              currentFWSent = ota.Firmware_Send_Info(CURRENT_FIRMWARE_TITLE, CURRENT_FIRMWARE_VERSION);
+              if (currentFWSent) {
+                  Serial.println("Firmware info sent");
+              } else {
+                  Serial.println("Failed to send firmware info");
+              }
+          }
+
+          // Subscribe to firmware updates if not already subscribed
+          if (!updateRequestSent) {
+              Serial.println("Firmware Update Subscription...");
+              const OTA_Update_Callback callback(CURRENT_FIRMWARE_TITLE,
+                                                CURRENT_FIRMWARE_VERSION,
+                                                &updater,
+                                                &finished_callback,
+                                                &progress_callback,
+                                                &update_starting_callback,
+                                                FIRMWARE_FAILURE_RETRIES,
+                                                FIRMWARE_PACKET_SIZE);
+              updateRequestSent = ota.Subscribe_Firmware_Update(callback);
+              if (updateRequestSent) {
+                  Serial.println("OTA subscription successful");
+              } else {
+                  Serial.println("Failed to subscribe to OTA updates");
+              }
+          }
+
+          // Send additional telemetry after successful subscription
+          if (updateRequestSent && !telemetrySent) {
+              tb.sendTelemetryData("target_fw_title", TARGET_FW_TITLE);
+              tb.sendTelemetryData("target_fw_version", TARGET_FW_VERSION);
+              telemetrySent = true;
+              Serial.println("Sent target firmware telemetry");
+          }
+
+          // Reduce CPU usage if all tasks are complete
+          if (currentFWSent && updateRequestSent && telemetrySent) {
+              vTaskDelay(60000 / portTICK_PERIOD_MS); // Sleep for 1 minute
+              continue;
+          }
+      }
+      vTaskDelay(1000 / portTICK_PERIOD_MS); // Delay 1 second if not connected
+  }
+}
+
 void setup()
 {
   Serial.begin(SERIAL_DEBUG_BAUD);
-  delay(1000);
+  delay(3000);
   Wire.begin(GPIO_NUM_11, GPIO_NUM_12); // Initialize I2C
   dht20.begin();
-  xTaskCreate(wifiTask, "WiFi Task", 4096, NULL, 2, NULL);
-  xTaskCreate(thingsboardTask, "ThingsBoard Task", 8192, NULL, 1, NULL);
-  xTaskCreate(dht20Task, "DHT20 Task", 16384, NULL, 0, NULL);
+  xTaskCreate(wifiTask, "WiFi Task", 8192, NULL, 2, NULL);
+  // xTaskCreate(otaTask, "OTA Task", 8192, NULL, 1, NULL);
+  xTaskCreate(thingsboardTask, "ThingsBoard Task", 16384, NULL, 1, NULL);
+  xTaskCreate(dht20Task, "DHT20 Task", 32768, NULL, 0, NULL);
+  xTaskCreate(otaTask, "OTA Task", 8192, NULL, 1, NULL);
 }
 
 void loop()

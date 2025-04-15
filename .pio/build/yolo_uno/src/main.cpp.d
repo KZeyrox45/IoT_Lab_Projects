@@ -265,4 +265,18 @@
  lib/ThingsBoard/src/Constants.h \
  lib/ThingsBoard/src/IAPI_Implementation.h \
  lib/ThingsBoard/src/API_Process_Type.h lib/ThingsBoard/src/ThingsBoard.h \
- lib/ThingsBoard/src/Telemetry.h
+ lib/ThingsBoard/src/Telemetry.h \
+ lib/ThingsBoard/src/OTA_Firmware_Update.h \
+ lib/ThingsBoard/src/Attribute_Request.h \
+ lib/ThingsBoard/src/Attribute_Request_Callback.h \
+ lib/ThingsBoard/src/Callback_Watchdog.h \
+ lib/ThingsBoard/src/Shared_Attribute_Update.h \
+ lib/ThingsBoard/src/Shared_Attribute_Callback.h \
+ lib/ThingsBoard/src/OTA_Handler.h lib/ThingsBoard/src/HashGenerator.h \
+ lib/ThingsBoard/src/OTA_Update_Callback.h lib/ThingsBoard/src/IUpdater.h \
+ lib/ThingsBoard/src/OTA_Failure_Response.h \
+ lib/ThingsBoard/src/Espressif_Updater.h \
+ C:/Users/Hieu/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/app_update/include/esp_ota_ops.h \
+ C:/Users/Hieu/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/bootloader_support/include/esp_image_format.h \
+ C:/Users/Hieu/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/bootloader_support/include/esp_flash_partitions.h \
+ C:/Users/Hieu/.platformio/packages/framework-arduinoespressif32/tools/sdk/esp32s3/include/bootloader_support/include/esp_app_format.h
